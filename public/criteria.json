@@ -1,0 +1,26 @@
+[
+  {
+    "id": "on_topic",
+    "name": "On Topic",
+    "description": "Addresses the customer's question",
+    "prompt": "Does the response directly address the customer's specific question or request? Answer ONLY with YES or NO on the first line, then provide a one-sentence reason."
+  },
+  {
+    "id": "correct",
+    "name": "Correct",
+    "description": "Information is accurate",
+    "prompt": "Is the information provided factually correct for a telecommunications/hosting company? Answer ONLY with YES or NO on the first line, then provide a one-sentence reason."
+  },
+  {
+    "id": "actionable",
+    "name": "Actionable",
+    "description": "Provides clear next steps",
+    "prompt": "Does the response give the customer clear, actionable steps they can take? Answer ONLY with YES or NO on the first line, then provide a one-sentence reason."
+  },
+  {
+    "id": "professional",
+    "name": "Professional",
+    "description": "Maintains appropriate tone",
+    "prompt": "Is the response professional and appropriate for customer service? Answer ONLY with YES or NO on the first line, then provide a one-sentence reason."
+  }
+]
