@@ -417,11 +417,8 @@ export default function Home() {
                             {c.name}
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom" className="max-w-md">
-                          <div className="space-y-2">
-                            <p className="font-semibold">{c.description}</p>
-                            <p className="text-xs opacity-70">{c.prompt}</p>
-                          </div>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          <p>{c.description}</p>
                         </TooltipContent>
                       </Tooltip>
                     </TableHead>
