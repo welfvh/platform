@@ -25,13 +25,13 @@ import {
 
 interface Message {
   message_id: string;
-  input_text: string;
-  evaluation_text: string;
+  message_type: 'USER_MESSAGE' | 'AGENT_MESSAGE';
+  content: string;
+  timestamp: string;
 }
 
 interface Conversation {
-  snippet_id: string;
-  snippet_name: string;
+  conversation_id: string;
   messages: Message[];
   annotation?: string;
 }
@@ -57,12 +57,11 @@ export default function AnnotationsPage() {
 
   const loadConversations = async () => {
     try {
-      const response = await fetch('/conversations.csv');
+      const response = await fetch('/m9-conversations.csv');
       const text = await response.text();
       const lines = text.split('\n');
-      const headers = lines[0].split(',');
 
-      // Parse CSV and group by snippet_id
+      // CSV format: year,month,day,hour,time,solon_use_case,company,branding,conversation_id,message_type,intent_names,content_anonymized,intent_ids,message_id
       const conversationMap = new Map<string, Conversation>();
 
       for (let i = 1; i < lines.length; i++) {
@@ -70,30 +69,40 @@ export default function AnnotationsPage() {
         if (!line) continue;
 
         const values = parseCSVLine(line);
-        if (values.length < 5) continue;
+        if (values.length < 14) continue;
 
-        const [snippet_id, snippet_name, message_id, input_text, evaluation_text] = values;
+        const [year, month, day, hour, time, solon_use_case, company, branding, conversation_id, message_type, intent_names, content_anonymized, intent_ids, message_id] = values;
 
-        if (!conversationMap.has(snippet_id)) {
-          conversationMap.set(snippet_id, {
-            snippet_id,
-            snippet_name,
+        // Filter for M9 conversations only
+        if (solon_use_case !== 'M9') continue;
+        if (!content_anonymized || content_anonymized.trim() === '') continue;
+
+        if (!conversationMap.has(conversation_id)) {
+          conversationMap.set(conversation_id, {
+            conversation_id,
             messages: [],
           });
         }
 
-        conversationMap.get(snippet_id)!.messages.push({
+        conversationMap.get(conversation_id)!.messages.push({
           message_id,
-          input_text,
-          evaluation_text,
+          message_type: message_type as 'USER_MESSAGE' | 'AGENT_MESSAGE',
+          content: content_anonymized.replace(/^"|"$/g, ''),
+          timestamp: `${year}-${month}-${day} ${time}`,
         });
       }
 
-      // Convert to array and sort messages within each conversation
-      const conversationsList = Array.from(conversationMap.values()).map(conv => ({
-        ...conv,
-        messages: conv.messages.sort((a, b) => a.message_id.localeCompare(b.message_id)),
-      }));
+      // Convert to array, sort messages within each conversation by timestamp, and limit to conversations with both user and agent messages
+      const conversationsList = Array.from(conversationMap.values())
+        .filter(conv => {
+          const hasUser = conv.messages.some(m => m.message_type === 'USER_MESSAGE');
+          const hasAgent = conv.messages.some(m => m.message_type === 'AGENT_MESSAGE');
+          return hasUser && hasAgent && conv.messages.length >= 2;
+        })
+        .map(conv => ({
+          ...conv,
+          messages: conv.messages.sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+        }));
 
       setConversations(conversationsList);
       setLoading(false);
@@ -125,23 +134,23 @@ export default function AnnotationsPage() {
     return result;
   };
 
-  const updateAnnotation = (snippet_id: string, annotation: string) => {
-    const updated = { ...annotations, [snippet_id]: annotation };
+  const updateAnnotation = (conversation_id: string, annotation: string) => {
+    const updated = { ...annotations, [conversation_id]: annotation };
     setAnnotations(updated);
     localStorage.setItem('conversation_annotations', JSON.stringify(updated));
   };
 
   const exportAnnotations = () => {
     const data = conversations.slice(0, selectedCount).map(conv => ({
-      snippet_id: conv.snippet_id,
-      snippet_name: conv.snippet_name,
-      turn_count: conv.messages.length,
-      annotation: annotations[conv.snippet_id] || '',
+      conversation_id: conv.conversation_id,
+      message_count: conv.messages.length,
+      turn_count: Math.floor(conv.messages.filter(m => m.message_type === 'USER_MESSAGE').length),
+      annotation: annotations[conv.conversation_id] || '',
     }));
 
     const csv = [
-      'snippet_id,snippet_name,turn_count,annotation',
-      ...data.map(d => `${d.snippet_id},${d.snippet_name},${d.turn_count},"${d.annotation.replace(/"/g, '""')}"`)
+      'conversation_id,message_count,turn_count,annotation',
+      ...data.map(d => `${d.conversation_id},${d.message_count},${d.turn_count},"${d.annotation.replace(/"/g, '""')}"`)
     ].join('\n');
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -153,9 +162,9 @@ export default function AnnotationsPage() {
   };
 
   const annotationStats = {
-    total: selectedCount,
-    annotated: conversations.slice(0, selectedCount).filter(c => annotations[c.snippet_id]).length,
-    pending: selectedCount - conversations.slice(0, selectedCount).filter(c => annotations[c.snippet_id]).length,
+    total: Math.min(selectedCount, conversations.length),
+    annotated: conversations.slice(0, selectedCount).filter(c => annotations[c.conversation_id]).length,
+    pending: Math.min(selectedCount, conversations.length) - conversations.slice(0, selectedCount).filter(c => annotations[c.conversation_id]).length,
   };
 
   if (loading) {
@@ -238,47 +247,55 @@ export default function AnnotationsPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="space-y-6">
-          {conversations.slice(0, selectedCount).map((conv, idx) => (
-            <div key={conv.snippet_id} className="rounded-lg border bg-card p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <Badge variant="outline" className="text-xs">#{idx + 1}</Badge>
-                  <div>
-                    <div className="font-medium">{conv.snippet_name}</div>
-                    <div className="text-xs text-muted-foreground mt-1">ID: {conv.snippet_id}</div>
+          {conversations.slice(0, selectedCount).map((conv, idx) => {
+            const userMessages = conv.messages.filter(m => m.message_type === 'USER_MESSAGE').length;
+            const agentMessages = conv.messages.filter(m => m.message_type === 'AGENT_MESSAGE').length;
+
+            return (
+              <div key={conv.conversation_id} className="rounded-lg border bg-card p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline" className="text-xs">#{idx + 1}</Badge>
+                    <div>
+                      <div className="font-medium">M9 Konversation</div>
+                      <div className="text-xs text-muted-foreground mt-1">ID: {conv.conversation_id}</div>
+                    </div>
                   </div>
+                  <Badge variant="secondary">{userMessages} {userMessages === 1 ? 'Turn' : 'Turns'}</Badge>
                 </div>
-                <Badge variant="secondary">{conv.messages.length} {conv.messages.length === 1 ? 'Turn' : 'Turns'}</Badge>
-              </div>
 
-              {/* Conversation Messages */}
-              <div className="space-y-3 mb-4">
-                {conv.messages.map((msg, msgIdx) => (
-                  <div key={msg.message_id} className="space-y-2">
-                    <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-3">
-                      <div className="text-xs text-muted-foreground mb-1">Frage {msgIdx + 1}:</div>
-                      <div className="text-sm">{msg.input_text}</div>
+                {/* Conversation Messages */}
+                <div className="space-y-3 mb-4">
+                  {conv.messages.map((msg, msgIdx) => (
+                    <div key={msg.message_id}>
+                      {msg.message_type === 'USER_MESSAGE' ? (
+                        <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-3">
+                          <div className="text-xs text-muted-foreground mb-1">Kunde:</div>
+                          <div className="text-sm">{msg.content}</div>
+                        </div>
+                      ) : (
+                        <div className="bg-green-50 dark:bg-green-950 rounded-lg p-3">
+                          <div className="text-xs text-muted-foreground mb-1">1&1 Assistent:</div>
+                          <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                        </div>
+                      )}
                     </div>
-                    <div className="bg-green-50 dark:bg-green-950 rounded-lg p-3">
-                      <div className="text-xs text-muted-foreground mb-1">Antwort {msgIdx + 1}:</div>
-                      <div className="text-sm">{msg.evaluation_text}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
 
-              {/* Annotation Field */}
-              <div className="border-t pt-4">
-                <label className="text-sm font-medium mb-2 block">Annotierung (Open Coding):</label>
-                <Textarea
-                  placeholder="Fehlertyp, Kategorie, Beobachtungen..."
-                  value={annotations[conv.snippet_id] || ''}
-                  onChange={(e) => updateAnnotation(conv.snippet_id, e.target.value)}
-                  className="min-h-[100px]"
-                />
+                {/* Annotation Field */}
+                <div className="border-t pt-4">
+                  <label className="text-sm font-medium mb-2 block">Annotierung (Open Coding):</label>
+                  <Textarea
+                    placeholder="Fehlertyp, Kategorie, Beobachtungen..."
+                    value={annotations[conv.conversation_id] || ''}
+                    onChange={(e) => updateAnnotation(conv.conversation_id, e.target.value)}
+                    className="min-h-[100px]"
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
