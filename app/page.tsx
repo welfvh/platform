@@ -302,6 +302,13 @@ export default function Home() {
                 </Button>
               </div>
               <Button
+                onClick={() => setShowHistoryModal(true)}
+                variant="outline"
+                size="default"
+              >
+                Run-Verlauf ({historicalRuns.length})
+              </Button>
+              <Button
                 onClick={() => setShowLogsModal(true)}
                 variant="outline"
                 size="default"
@@ -597,6 +604,85 @@ export default function Home() {
                   </details>
                 </div>
               ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Run History Modal */}
+      <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
+        <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Run-Verlauf</DialogTitle>
+            <DialogDescription>
+              Alle gespeicherten Evaluierungs-Runs ({historicalRuns.length} insgesamt)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {historicalRuns.length === 0 ? (
+              <p className="text-muted-foreground text-sm">Noch keine Runs. Generieren Sie Antworten, um einen neuen Run zu starten.</p>
+            ) : (
+              historicalRuns.slice().reverse().map((run) => {
+                const runDate = new Date(run.timestamp);
+                const isCurrentRun = run.id === currentRunId;
+                return (
+                  <div key={run.id} className={`border rounded-lg p-4 ${isCurrentRun ? 'bg-primary/5 border-primary' : 'bg-muted/30'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <Badge variant={run.status === 'evaluated' ? 'default' : 'secondary'}>
+                          {run.status === 'generated' ? 'Generiert' : run.status === 'evaluated' ? 'Ausgewertet' : run.status}
+                        </Badge>
+                        {isCurrentRun && <Badge variant="outline">Aktuell</Badge>}
+                        <span className="text-sm font-medium">{runDate.toLocaleString('de-DE')}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setQAPairs(run.qaPairs);
+                          setCurrentRunId(run.id);
+                          setRunPhase(run.status);
+                          setGeneratorModel(run.generatorModel);
+                          if (run.evaluatorModel) setEvaluatorModel(run.evaluatorModel);
+                          setShowHistoryModal(false);
+                        }}
+                      >
+                        Laden
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Generator:</span>
+                        <div className="font-medium">{run.generatorModel}</div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Evaluator:</span>
+                        <div className="font-medium">{run.evaluatorModel || '—'}</div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Prompt Version:</span>
+                        <div className="font-medium">{run.promptVersionId}</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center gap-6 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Q&A Paare:</span>
+                        <span className="ml-2 font-medium">{run.qaPairs.length}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">LLM Score:</span>
+                        <span className="ml-2 font-medium">{(run.aggregateScores.llm * 100).toFixed(1)}%</span>
+                      </div>
+                      {run.aggregateScores.human !== undefined && (
+                        <div>
+                          <span className="text-muted-foreground">Human Score:</span>
+                          <span className="ml-2 font-medium">{(run.aggregateScores.human * 100).toFixed(1)}%</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </DialogContent>
