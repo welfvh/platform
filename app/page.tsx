@@ -53,6 +53,7 @@ export default function Home() {
   const [currentPromptVersion, setCurrentPromptVersion] = useState<PromptVersion | null>(null);
   const [historicalRuns, setHistoricalRuns] = useState<EvaluationRun[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   useEffect(() => {
     fetch('/criteria.json').then(res => res.json()).then(setCriteria);
@@ -83,6 +84,10 @@ export default function Home() {
   // Phase 1: Generate answers only
   const startGeneration = async () => {
     if (!currentPromptVersion) return;
+
+    // Create new AbortController for this run
+    const controller = new AbortController();
+    setAbortController(controller);
 
     setRunPhase('generating');
     setShouldStop(false);
@@ -118,6 +123,7 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(genReqBody),
+          signal: controller.signal,
         });
         const genResData = await genRes.json();
         const { qaPairs: generatedPairs } = genResData;
@@ -133,6 +139,10 @@ export default function Home() {
           response: genResData
         }]);
       } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          console.log('Generation request cancelled');
+          break;
+        }
         console.error('Error generating answer for pair', i, error);
       }
     }
@@ -140,6 +150,7 @@ export default function Home() {
     setRunPhase('generated');
     setCurrentIndex(-1);
     setShouldStop(false);
+    setAbortController(null);
 
     // Save the run
     const run: EvaluationRun = {
@@ -164,6 +175,10 @@ export default function Home() {
   const startEvaluation = async () => {
     if (!currentPromptVersion || !currentRunId) return;
 
+    // Create new AbortController for this evaluation
+    const controller = new AbortController();
+    setAbortController(controller);
+
     setRunPhase('evaluating');
     setShouldStop(false);
     setCurrentIndex(0);
@@ -186,6 +201,7 @@ export default function Home() {
             answer: updatedPairs[i].answer,
             model: evaluatorModel,
           }),
+          signal: controller.signal,
         });
         const evalResData = await evalRes.json();
         const { evaluations, score } = evalResData;
@@ -208,6 +224,10 @@ export default function Home() {
           response: evalResData
         }]);
       } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          console.log('Evaluation request cancelled');
+          break;
+        }
         console.error('Error evaluating pair', i, error);
       }
     }
@@ -215,6 +235,7 @@ export default function Home() {
     setRunPhase('evaluated');
     setCurrentIndex(-1);
     setShouldStop(false);
+    setAbortController(null);
 
     // Calculate aggregate scores
     const evaluatedPairs = updatedPairs.slice(0, selectedCount).filter(p => p.evaluation);
@@ -253,6 +274,12 @@ export default function Home() {
   };
 
   const stopProcessing = () => {
+    // Abort any ongoing API requests
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+
     setShouldStop(true);
     if (runPhase === 'generating') {
       setRunPhase('generated');
@@ -375,7 +402,7 @@ export default function Home() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="rounded-lg border bg-card">
-          <TooltipProvider>
+          <TooltipProvider delayDuration={300}>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -384,14 +411,16 @@ export default function Home() {
                   <TableHead className="w-48">Antwort</TableHead>
                   {criteria.map(c => (
                     <TableHead key={c.id} className="text-center w-24">
-                      <Tooltip>
-                        <TooltipTrigger className="cursor-help">
-                          <div className="w-full">{c.name}</div>
+                      <Tooltip delayDuration={200}>
+                        <TooltipTrigger asChild>
+                          <button className="cursor-help text-sm font-medium hover:underline">
+                            {c.name}
+                          </button>
                         </TooltipTrigger>
-                        <TooltipContent className="max-w-md">
+                        <TooltipContent side="bottom" className="max-w-md">
                           <div className="space-y-2">
                             <p className="font-semibold">{c.description}</p>
-                            <p className="text-xs text-muted-foreground">{c.prompt}</p>
+                            <p className="text-xs opacity-70">{c.prompt}</p>
                           </div>
                         </TooltipContent>
                       </Tooltip>
@@ -401,10 +430,12 @@ export default function Home() {
                 </TableRow>
               </TableHeader>
             <TableBody>
-              {qaPairs.slice(0, selectedCount).map((pair, index) => (
+              {qaPairs.slice(0, selectedCount).map((pair, index) => {
+                const isCurrentlyProcessing = (runPhase === 'generating' || runPhase === 'evaluating') && index === currentIndex;
+                return (
                 <TableRow
                   key={pair.id}
-                  className={(runPhase === 'generating' || runPhase === 'evaluating') && index === currentIndex ? 'bg-primary/10' : ''}
+                  className={isCurrentlyProcessing ? 'bg-blue-50 dark:bg-blue-950' : ''}
                 >
                   <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
                   <TableCell>{pair.question}</TableCell>
@@ -463,7 +494,8 @@ export default function Home() {
                     )}
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
             <tfoot className="border-t-2 bg-muted/30">
               <tr>
