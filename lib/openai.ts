@@ -1,10 +1,10 @@
-// Anthropic API client configuration and utilities
-import Anthropic from '@anthropic-ai/sdk';
+// OpenAI API client configuration and utilities
+import OpenAI from 'openai';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // Load the system prompt from the markdown file
@@ -13,15 +13,18 @@ export function getSystemPrompt(): string {
   return readFileSync(promptPath, 'utf-8');
 }
 
-// Generate an answer for a customer question
+// Generate an answer for a customer question using OpenAI
 export async function generateAnswer(question: string, model: string): Promise<string> {
   const systemPrompt = getSystemPrompt();
 
-  const response = await anthropic.messages.create({
+  const response = await openai.chat.completions.create({
     model: model,
     max_tokens: 512,
-    system: systemPrompt,
     messages: [
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
       {
         role: 'user',
         content: question,
@@ -29,11 +32,10 @@ export async function generateAnswer(question: string, model: string): Promise<s
     ],
   });
 
-  const textContent = response.content.find((block) => block.type === 'text');
-  return textContent && textContent.type === 'text' ? textContent.text : '';
+  return response.choices[0]?.message?.content || '';
 }
 
-// Evaluate a Q&A pair against a specific criterion
+// Evaluate a Q&A pair against a specific criterion using OpenAI
 export async function evaluateCriterion(
   question: string,
   answer: string,
@@ -50,7 +52,7 @@ Provide your evaluation in the following format:
 RESULT: YES or NO
 REASONING: Your explanation here`;
 
-  const response = await anthropic.messages.create({
+  const response = await openai.chat.completions.create({
     model: model,
     max_tokens: 512,
     messages: [
@@ -61,8 +63,7 @@ REASONING: Your explanation here`;
     ],
   });
 
-  const textContent = response.content.find((block) => block.type === 'text');
-  const text = textContent && textContent.type === 'text' ? textContent.text : '';
+  const text = response.choices[0]?.message?.content || '';
 
   // Parse the response to extract result and reasoning (handles both German and English)
   const resultMatch = text.match(/RESULT:\s*(YES|NO|JA|NEIN)/i);

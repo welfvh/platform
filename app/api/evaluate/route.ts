@@ -1,9 +1,15 @@
 // API route for evaluating Q&A pairs using LLM
 import { NextRequest, NextResponse } from 'next/server';
-import { evaluateCriterion } from '@/lib/anthropic';
+import { evaluateCriterion as evaluateAnthropicCriterion } from '@/lib/anthropic';
+import { evaluateCriterion as evaluateOpenAICriterion } from '@/lib/openai';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { Criterion, CriterionEvaluation } from '@/lib/types';
+
+// Determine if a model is from OpenAI
+function isOpenAIModel(model: string): boolean {
+  return model.startsWith('gpt-') || model.startsWith('o1-') || model.startsWith('o3-');
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,7 +22,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const modelToUse = model || 'claude-3-5-haiku-20241022';
+    const modelToUse = model || 'claude-sonnet-4-20250514';
+    const useOpenAI = isOpenAIModel(modelToUse);
 
     // Load criteria
     const criteriaPath = join(process.cwd(), 'public', 'criteria.json');
@@ -27,7 +34,10 @@ export async function POST(request: NextRequest) {
 
     for (const criterion of criteria) {
       try {
-        const result = await evaluateCriterion(question, answer, criterion.prompt, modelToUse);
+        const result = useOpenAI
+          ? await evaluateOpenAICriterion(question, answer, criterion.prompt, modelToUse)
+          : await evaluateAnthropicCriterion(question, answer, criterion.prompt, modelToUse);
+
         evaluations.push({
           criterionId: criterion.id,
           passed: result.passed,

@@ -43,7 +43,7 @@ export default function Home() {
   const [selectedCount, setSelectedCount] = useState<10 | 100>(10);
   const [shouldStop, setShouldStop] = useState(false);
   const [generatorModel, setGeneratorModel] = useState('claude-3-5-haiku-20241022');
-  const [evaluatorModel, setEvaluatorModel] = useState('claude-3-5-haiku-20241022');
+  const [evaluatorModel, setEvaluatorModel] = useState('claude-sonnet-4-20250514');
   const [promptContent, setPromptContent] = useState('');
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [apiLogs, setApiLogs] = useState<Array<{timestamp: string, type: string, model: string, request: any, response: any}>>([]);
@@ -378,7 +378,7 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground font-medium">Modell:</span>
                       <Select value={generatorModel} onValueChange={setGeneratorModel}>
-                        <SelectTrigger className="w-[140px] h-8">
+                        <SelectTrigger className="w-[160px] h-8">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -386,6 +386,10 @@ export default function Home() {
                           <SelectItem value="claude-sonnet-4-5-20250929">Sonnet 4.5</SelectItem>
                           <SelectItem value="claude-sonnet-4-20250514">Sonnet 4</SelectItem>
                           <SelectItem value="claude-opus-4-20250514">Opus 4</SelectItem>
+                          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                          <SelectItem value="o1">o1</SelectItem>
+                          <SelectItem value="o1-mini">o1-mini</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -393,7 +397,7 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground font-medium">Evaluator:</span>
                       <Select value={evaluatorModel} onValueChange={setEvaluatorModel}>
-                        <SelectTrigger className="w-[140px] h-8">
+                        <SelectTrigger className="w-[160px] h-8">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -401,6 +405,10 @@ export default function Home() {
                           <SelectItem value="claude-sonnet-4-5-20250929">Sonnet 4.5</SelectItem>
                           <SelectItem value="claude-sonnet-4-20250514">Sonnet 4</SelectItem>
                           <SelectItem value="claude-opus-4-20250514">Opus 4</SelectItem>
+                          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                          <SelectItem value="o1">o1</SelectItem>
+                          <SelectItem value="o1-mini">o1-mini</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

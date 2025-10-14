@@ -18,6 +18,7 @@ export interface Evaluation {
   humanEvaluations?: CriterionEvaluation[];
   llmScore: number;
   humanScore?: number;
+  synthesisScore?: number;
 }
 
 export interface QAPair {
@@ -27,14 +28,32 @@ export interface QAPair {
   evaluation?: Evaluation;
 }
 
+export interface PromptVersion {
+  id: string;
+  version: string;
+  content: string;
+  createdAt: number;
+  description?: string;
+}
+
 export interface EvaluationRun {
   id: string;
   timestamp: number;
-  status: 'pending' | 'running' | 'completed' | 'error';
+  status: 'generation' | 'generated' | 'evaluating' | 'evaluated' | 'error';
+  promptVersionId: string;
+  generatorModel: string;
+  evaluatorModel?: string;
   qaPairs: QAPair[];
   aggregateScores: {
     llm: number;
     human?: number;
     synthesis?: number;
+    perCriterion?: {
+      [criterionId: string]: {
+        llm: number;
+        human?: number;
+        synthesis?: number;
+      };
+    };
   };
 }

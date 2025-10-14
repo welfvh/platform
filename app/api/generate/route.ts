@@ -1,6 +1,12 @@
 // API route for generating answers from customer questions
 import { NextRequest, NextResponse } from 'next/server';
-import { generateAnswer } from '@/lib/anthropic';
+import { generateAnswer as generateAnthropicAnswer } from '@/lib/anthropic';
+import { generateAnswer as generateOpenAIAnswer } from '@/lib/openai';
+
+// Determine if a model is from OpenAI
+function isOpenAIModel(model: string): boolean {
+  return model.startsWith('gpt-') || model.startsWith('o1-') || model.startsWith('o3-');
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,10 +21,14 @@ export async function POST(request: NextRequest) {
 
     const modelToUse = model || 'claude-3-5-haiku-20241022';
     const qaPairs = [];
+    const useOpenAI = isOpenAIModel(modelToUse);
 
     for (const question of questions) {
       try {
-        const answer = await generateAnswer(question, modelToUse);
+        const answer = useOpenAI
+          ? await generateOpenAIAnswer(question, modelToUse)
+          : await generateAnthropicAnswer(question, modelToUse);
+
         qaPairs.push({
           id: crypto.randomUUID(),
           question,
