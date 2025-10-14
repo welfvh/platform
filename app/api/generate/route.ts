@@ -5,7 +5,7 @@ import { generateAnswer as generateOpenAIAnswer } from '@/lib/openai';
 
 // Determine if a model is from OpenAI
 function isOpenAIModel(model: string): boolean {
-  return model.startsWith('gpt-') || model.startsWith('o1-') || model.startsWith('o3-');
+  return model.startsWith('gpt-') || model.startsWith('o1-') || model.startsWith('o3-') || model.startsWith('o4-');
 }
 
 export async function POST(request: NextRequest) {

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { QAPair, Criterion } from '@/lib/types';
+import type { QAPair, Criterion, EvaluationRun, PromptVersion } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { saveRun, getRuns, initializeDefaultPromptVersion, getCurrentPromptVersionId } from '@/lib/storage';
 import {
   Table,
   TableBody,
@@ -38,7 +39,7 @@ export default function Home() {
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [sampleInputs, setSampleInputs] = useState<string[]>([]);
   const [qaPairs, setQAPairs] = useState<QAPair[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [runPhase, setRunPhase] = useState<'idle' | 'generating' | 'generated' | 'evaluating' | 'evaluated'>('idle');
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [selectedCount, setSelectedCount] = useState<10 | 100>(10);
   const [shouldStop, setShouldStop] = useState(false);
@@ -48,6 +49,10 @@ export default function Home() {
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [apiLogs, setApiLogs] = useState<Array<{timestamp: string, type: string, model: string, request: any, response: any}>>([]);
   const [showLogsModal, setShowLogsModal] = useState(false);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [currentPromptVersion, setCurrentPromptVersion] = useState<PromptVersion | null>(null);
+  const [historicalRuns, setHistoricalRuns] = useState<EvaluationRun[]>([]);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   useEffect(() => {
     fetch('/criteria.json').then(res => res.json()).then(setCriteria);
@@ -62,14 +67,30 @@ export default function Home() {
       }));
       setQAPairs(initialPairs);
     });
-    // Load prompt content
-    fetch('/api/prompt').then(res => res.text()).then(setPromptContent);
+
+    // Load prompt content and initialize version
+    fetch('/api/prompt').then(res => res.text()).then((content) => {
+      setPromptContent(content);
+      const version = initializeDefaultPromptVersion(content);
+      setCurrentPromptVersion(version);
+    });
+
+    // Load historical runs
+    const runs = getRuns();
+    setHistoricalRuns(runs);
   }, []);
 
-  const startEvaluation = async () => {
-    setIsProcessing(true);
+  // Phase 1: Generate answers only
+  const startGeneration = async () => {
+    if (!currentPromptVersion) return;
+
+    setRunPhase('generating');
     setShouldStop(false);
     setCurrentIndex(0);
+
+    // Create new run
+    const runId = `run-${Date.now()}`;
+    setCurrentRunId(runId);
 
     // Work with existing qaPairs, process only the selected count
     const updatedPairs = [...qaPairs];
@@ -84,7 +105,7 @@ export default function Home() {
     }
     setQAPairs([...updatedPairs]);
 
-    // Process one by one with parallel evaluation
+    // Generate answers one by one
     for (let i = 0; i < selectedCount; i++) {
       if (shouldStop) break;
 
@@ -111,9 +132,53 @@ export default function Home() {
           request: genReqBody,
           response: genResData
         }]);
+      } catch (error) {
+        console.error('Error generating answer for pair', i, error);
+      }
+    }
 
-        // Start evaluation in parallel (don't wait for it before showing answer)
-        const evalPromise = fetch('/api/evaluate', {
+    setRunPhase('generated');
+    setCurrentIndex(-1);
+    setShouldStop(false);
+
+    // Save the run
+    const run: EvaluationRun = {
+      id: runId,
+      timestamp: Date.now(),
+      status: 'generated',
+      promptVersionId: currentPromptVersion.id,
+      generatorModel,
+      evaluatorModel: undefined,
+      qaPairs: updatedPairs.slice(0, selectedCount),
+      aggregateScores: {
+        llm: 0,
+        human: undefined,
+        synthesis: undefined,
+      },
+    };
+    saveRun(run);
+    setHistoricalRuns(getRuns());
+  };
+
+  // Phase 2: Evaluate existing answers
+  const startEvaluation = async () => {
+    if (!currentPromptVersion || !currentRunId) return;
+
+    setRunPhase('evaluating');
+    setShouldStop(false);
+    setCurrentIndex(0);
+
+    const updatedPairs = [...qaPairs];
+
+    // Evaluate answers one by one
+    for (let i = 0; i < selectedCount; i++) {
+      if (shouldStop) break;
+      if (!updatedPairs[i].answer) continue; // Skip if no answer
+
+      setCurrentIndex(i);
+
+      try {
+        const evalRes = await fetch('/api/evaluate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -121,44 +186,79 @@ export default function Home() {
             answer: updatedPairs[i].answer,
             model: evaluatorModel,
           }),
-        }).then(async (evalRes) => {
-          const evalResData = await evalRes.json();
-          const { evaluations, score } = evalResData;
-          updatedPairs[i].evaluation = {
-            llmEvaluations: evaluations,
-            llmScore: score,
-          };
-          setQAPairs([...updatedPairs]);
-
-          // Log evaluation API call
-          setApiLogs(prev => [...prev, {
-            timestamp: new Date().toLocaleTimeString(),
-            type: 'evaluate',
-            model: evaluatorModel,
-            request: {
-              question: updatedPairs[i].question,
-              answer: updatedPairs[i].answer,
-              model: evaluatorModel,
-            },
-            response: evalResData
-          }]);
         });
+        const evalResData = await evalRes.json();
+        const { evaluations, score } = evalResData;
+        updatedPairs[i].evaluation = {
+          llmEvaluations: evaluations,
+          llmScore: score,
+        };
+        setQAPairs([...updatedPairs]);
 
-        // Wait for evaluation before moving to next question
-        await evalPromise;
+        // Log evaluation API call
+        setApiLogs(prev => [...prev, {
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'evaluate',
+          model: evaluatorModel,
+          request: {
+            question: updatedPairs[i].question,
+            answer: updatedPairs[i].answer,
+            model: evaluatorModel,
+          },
+          response: evalResData
+        }]);
       } catch (error) {
-        console.error('Error processing pair', i, error);
+        console.error('Error evaluating pair', i, error);
       }
     }
 
-    setIsProcessing(false);
+    setRunPhase('evaluated');
     setCurrentIndex(-1);
     setShouldStop(false);
+
+    // Calculate aggregate scores
+    const evaluatedPairs = updatedPairs.slice(0, selectedCount).filter(p => p.evaluation);
+    const totalLLMScore = evaluatedPairs.reduce((sum, p) => sum + (p.evaluation?.llmScore || 0), 0);
+    const avgLLMScore = evaluatedPairs.length > 0 ? totalLLMScore / evaluatedPairs.length : 0;
+
+    // Calculate per-criterion scores
+    const perCriterion: { [criterionId: string]: { llm: number } } = {};
+    criteria.forEach(criterion => {
+      const passCount = evaluatedPairs.filter(p =>
+        p.evaluation?.llmEvaluations?.find(e => e.criterionId === criterion.id)?.passed
+      ).length;
+      perCriterion[criterion.id] = {
+        llm: evaluatedPairs.length > 0 ? passCount / evaluatedPairs.length : 0,
+      };
+    });
+
+    // Save/update the run
+    const run: EvaluationRun = {
+      id: currentRunId,
+      timestamp: Date.now(),
+      status: 'evaluated',
+      promptVersionId: currentPromptVersion.id,
+      generatorModel,
+      evaluatorModel,
+      qaPairs: updatedPairs.slice(0, selectedCount),
+      aggregateScores: {
+        llm: avgLLMScore,
+        human: undefined,
+        synthesis: undefined,
+        perCriterion,
+      },
+    };
+    saveRun(run);
+    setHistoricalRuns(getRuns());
   };
 
-  const stopEvaluation = () => {
+  const stopProcessing = () => {
     setShouldStop(true);
-    setIsProcessing(false);
+    if (runPhase === 'generating') {
+      setRunPhase('generated');
+    } else if (runPhase === 'evaluating') {
+      setRunPhase('evaluated');
+    }
     setCurrentIndex(-1);
   };
 
@@ -184,7 +284,7 @@ export default function Home() {
               <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
                 <Button
                   onClick={() => setSelectedCount(10)}
-                  disabled={isProcessing}
+                  disabled={runPhase === 'generating' || runPhase === 'evaluating'}
                   variant={selectedCount === 10 ? 'default' : 'ghost'}
                   size="sm"
                   className="h-8"
@@ -193,7 +293,7 @@ export default function Home() {
                 </Button>
                 <Button
                   onClick={() => setSelectedCount(100)}
-                  disabled={isProcessing}
+                  disabled={runPhase === 'generating' || runPhase === 'evaluating'}
                   variant={selectedCount === 100 ? 'default' : 'ghost'}
                   size="sm"
                   className="h-8"
@@ -208,22 +308,33 @@ export default function Home() {
               >
                 Debug-Protokolle
               </Button>
-              {isProcessing ? (
+              {runPhase === 'generating' || runPhase === 'evaluating' ? (
                 <Button
-                  onClick={stopEvaluation}
+                  onClick={stopProcessing}
                   variant="destructive"
                   size="default"
                 >
                   Stoppen
                 </Button>
               ) : (
-                <Button
-                  onClick={startEvaluation}
-                  disabled={qaPairs.length === 0}
-                  size="default"
-                >
-                  Auswertung starten
-                </Button>
+                <>
+                  <Button
+                    onClick={startGeneration}
+                    disabled={qaPairs.length === 0}
+                    size="default"
+                    variant="default"
+                  >
+                    Antworten generieren
+                  </Button>
+                  <Button
+                    onClick={startEvaluation}
+                    disabled={runPhase !== 'generated' && runPhase !== 'evaluated'}
+                    size="default"
+                    variant="secondary"
+                  >
+                    Auswertung starten
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -281,7 +392,7 @@ export default function Home() {
               {qaPairs.slice(0, selectedCount).map((pair, index) => (
                 <TableRow
                   key={pair.id}
-                  className={isProcessing && index === currentIndex ? 'bg-primary/10' : ''}
+                  className={(runPhase === 'generating' || runPhase === 'evaluating') && index === currentIndex ? 'bg-primary/10' : ''}
                 >
                   <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
                   <TableCell>{pair.question}</TableCell>
@@ -388,8 +499,9 @@ export default function Home() {
                           <SelectItem value="claude-opus-4-20250514">Opus 4</SelectItem>
                           <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                           <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                          <SelectItem value="o1">o1</SelectItem>
-                          <SelectItem value="o1-mini">o1-mini</SelectItem>
+                          <SelectItem value="gpt-4.1-mini">GPT-4.1 Mini</SelectItem>
+                          <SelectItem value="gpt-5">GPT-5</SelectItem>
+                          <SelectItem value="gpt-5-mini">GPT-5 Mini</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -407,8 +519,9 @@ export default function Home() {
                           <SelectItem value="claude-opus-4-20250514">Opus 4</SelectItem>
                           <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                           <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                          <SelectItem value="o1">o1</SelectItem>
-                          <SelectItem value="o1-mini">o1-mini</SelectItem>
+                          <SelectItem value="gpt-4.1-mini">GPT-4.1 Mini</SelectItem>
+                          <SelectItem value="gpt-5">GPT-5</SelectItem>
+                          <SelectItem value="gpt-5-mini">GPT-5 Mini</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
