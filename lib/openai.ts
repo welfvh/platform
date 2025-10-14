@@ -3,9 +3,10 @@ import OpenAI from 'openai';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Only initialize OpenAI client if API key is available
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 // Load the system prompt from the markdown file
 export function getSystemPrompt(): string {
@@ -15,6 +16,10 @@ export function getSystemPrompt(): string {
 
 // Generate an answer for a customer question using OpenAI
 export async function generateAnswer(question: string, model: string): Promise<string> {
+  if (!openai) {
+    throw new Error('OpenAI API key not configured. Please set OPENAI_API_KEY in your .env file.');
+  }
+
   const systemPrompt = getSystemPrompt();
 
   const response = await openai.chat.completions.create({
@@ -42,6 +47,10 @@ export async function evaluateCriterion(
   criterionPrompt: string,
   model: string
 ): Promise<{ passed: boolean; reasoning: string }> {
+  if (!openai) {
+    throw new Error('OpenAI API key not configured. Please set OPENAI_API_KEY in your .env file.');
+  }
+
   const evaluationPrompt = `${criterionPrompt}
 
 Question: ${question}

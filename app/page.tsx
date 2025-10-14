@@ -385,9 +385,14 @@ export default function Home() {
                   {criteria.map(c => (
                     <TableHead key={c.id} className="text-center w-24">
                       <Tooltip>
-                        <TooltipTrigger className="cursor-help">{c.name}</TooltipTrigger>
-                        <TooltipContent>
-                          <p className="max-w-xs">{c.description}</p>
+                        <TooltipTrigger className="cursor-help">
+                          <div className="w-full">{c.name}</div>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-md">
+                          <div className="space-y-2">
+                            <p className="font-semibold">{c.description}</p>
+                            <p className="text-xs text-muted-foreground">{c.prompt}</p>
+                          </div>
                         </TooltipContent>
                       </Tooltip>
                     </TableHead>
