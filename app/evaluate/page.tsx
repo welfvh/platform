@@ -404,8 +404,8 @@ export default function EvaluatePage() {
   const evaluationStats = {
     total: Math.min(selectedCount, conversations.length),
     evaluated: conversations.slice(0, selectedCount).filter(c => {
-      const eval = evaluations[c.conversation_id];
-      return eval && (eval.annotation || Object.keys(eval.criteria).length > 0);
+      const evalData = evaluations[c.conversation_id];
+      return evalData && (evalData.annotation || Object.keys(evalData.criteria).length > 0);
     }).length,
   };
 
