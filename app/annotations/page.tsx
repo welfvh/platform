@@ -22,6 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 
 interface Message {
   message_id: string;
@@ -41,41 +49,33 @@ export default function AnnotationsPage() {
   const [selectedCount, setSelectedCount] = useState<10 | 25 | 50>(10);
   const [loading, setLoading] = useState(true);
   const [annotations, setAnnotations] = useState<{ [key: string]: string }>({});
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
 
   useEffect(() => {
     loadConversations();
-    // Load saved annotations from localStorage
-    const saved = localStorage.getItem('conversation_annotations');
-    if (saved) {
-      try {
-        setAnnotations(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to load annotations', e);
-      }
-    }
+    // Annotations are now loaded within loadConversations to merge with CSV data
   }, []);
 
   const loadConversations = async () => {
     try {
-      const response = await fetch('/m9-conversations.csv');
+      const response = await fetch('/representative-sample.csv');
       const text = await response.text();
-      const lines = text.split('\n');
 
-      // CSV format: year,month,day,hour,time,solon_use_case,company,branding,conversation_id,message_type,intent_names,content_anonymized,intent_ids,message_id
+      // Parse CSV with proper multi-line field handling
+      const rows = parseCSV(text);
+
+      // CSV format: conversation_id,message_number,annotation,year,month,day,time,message_type,intent_names,content_anonymized,message_id
       const conversationMap = new Map<string, Conversation>();
+      const preloadedAnnotations: { [key: string]: string } = {};
 
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
+      // Skip header row (index 0)
+      for (let i = 1; i < rows.length; i++) {
+        const values = rows[i];
+        if (values.length < 11) continue;
 
-        const values = parseCSVLine(line);
-        if (values.length < 14) continue;
+        const [conversation_id, message_number, annotation, year, month, day, time, message_type, intent_names, content_anonymized, message_id] = values;
 
-        const [year, month, day, hour, time, solon_use_case, company, branding, conversation_id, message_type, intent_names, content_anonymized, intent_ids, message_id] = values;
-
-        // Filter for M9 conversations only
-        if (solon_use_case !== 'M9') continue;
-        if (!content_anonymized || content_anonymized.trim() === '') continue;
+        if (!content_anonymized || content_anonymized.trim() === '' || content_anonymized === 'null') continue;
 
         if (!conversationMap.has(conversation_id)) {
           conversationMap.set(conversation_id, {
@@ -84,11 +84,21 @@ export default function AnnotationsPage() {
           });
         }
 
+        // Store pre-existing annotation if present (only once per conversation)
+        if (annotation && annotation.trim() !== '' && !preloadedAnnotations[conversation_id]) {
+          preloadedAnnotations[conversation_id] = annotation.trim();
+        }
+
+        // Create timestamp for proper sorting (YYYY-MM-DD HH:MM:SS format)
+        const paddedMonth = month.padStart(2, '0');
+        const paddedDay = day.padStart(2, '0');
+        const timestamp = `${year}-${paddedMonth}-${paddedDay} ${time}`;
+
         conversationMap.get(conversation_id)!.messages.push({
           message_id,
           message_type: message_type as 'USER_MESSAGE' | 'AGENT_MESSAGE',
-          content: content_anonymized.replace(/^"|"$/g, ''),
-          timestamp: `${year}-${month}-${day} ${time}`,
+          content: content_anonymized.trim(),
+          timestamp,
         });
       }
 
@@ -105,6 +115,20 @@ export default function AnnotationsPage() {
         }));
 
       setConversations(conversationsList);
+
+      // Merge pre-loaded annotations with localStorage (localStorage takes precedence)
+      const savedAnnotations = localStorage.getItem('conversation_annotations');
+      const mergedAnnotations = { ...preloadedAnnotations };
+      if (savedAnnotations) {
+        try {
+          const parsed = JSON.parse(savedAnnotations);
+          Object.assign(mergedAnnotations, parsed); // localStorage overrides preloaded
+        } catch (e) {
+          console.error('Failed to parse saved annotations', e);
+        }
+      }
+      setAnnotations(mergedAnnotations);
+
       setLoading(false);
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -112,26 +136,58 @@ export default function AnnotationsPage() {
     }
   };
 
-  const parseCSVLine = (line: string): string[] => {
-    const result: string[] = [];
+  // Parse CSV handling multi-line quoted fields
+  const parseCSV = (text: string): string[][] => {
+    const rows: string[][] = [];
+    const row: string[] = [];
     let current = '';
     let inQuotes = false;
 
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const nextChar = text[i + 1];
 
-      if (char === '"') {
+      if (char === '"' && inQuotes && nextChar === '"') {
+        // Escaped quote (two quotes in a row)
+        current += '"';
+        i++; // Skip next quote
+      } else if (char === '"') {
+        // Toggle quote mode
         inQuotes = !inQuotes;
       } else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
+        // Field separator
+        row.push(current);
         current = '';
+      } else if (char === '\n' && !inQuotes) {
+        // Row separator (only when not inside quotes)
+        row.push(current);
+        if (row.length > 0) {
+          rows.push(row.slice());
+        }
+        row.length = 0;
+        current = '';
+        // Skip \r if present (Windows line endings)
+        if (text[i - 1] === '\r') {
+          // Already handled
+        }
+      } else if (char === '\r' && nextChar === '\n' && !inQuotes) {
+        // Windows line ending - skip \r, let \n handle it
+        continue;
       } else {
+        // Regular character
         current += char;
       }
     }
-    result.push(current.trim());
 
-    return result;
+    // Push last field and row
+    if (current || row.length > 0) {
+      row.push(current);
+      if (row.length > 0) {
+        rows.push(row);
+      }
+    }
+
+    return rows;
   };
 
   const updateAnnotation = (conversation_id: string, annotation: string) => {
@@ -212,9 +268,65 @@ export default function AnnotationsPage() {
                   50
                 </Button>
               </div>
-              <Button onClick={exportAnnotations} variant="outline" size="default">
-                Annotationen exportieren
-              </Button>
+              <div className="flex items-center gap-2">
+                <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="default">
+                      Annotationen anzeigen
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Annotationen Übersicht</DialogTitle>
+                      <DialogDescription>
+                        Alle annotierten Konversationen im Überblick
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-4">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[50px]">#</TableHead>
+                            <TableHead className="w-[250px]">Konversation ID</TableHead>
+                            <TableHead className="w-[100px]">Nachrichten</TableHead>
+                            <TableHead className="w-[100px]">Turns</TableHead>
+                            <TableHead>Annotierung</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {conversations.slice(0, selectedCount).map((conv, idx) => {
+                            const annotation = annotations[conv.conversation_id];
+                            const userMessages = conv.messages.filter(m => m.message_type === 'USER_MESSAGE').length;
+
+                            // Only show annotated conversations
+                            if (!annotation) return null;
+
+                            return (
+                              <TableRow key={conv.conversation_id}>
+                                <TableCell className="font-medium">#{idx + 1}</TableCell>
+                                <TableCell className="font-mono text-xs">{conv.conversation_id}</TableCell>
+                                <TableCell>{conv.messages.length}</TableCell>
+                                <TableCell>{userMessages}</TableCell>
+                                <TableCell className="max-w-md">
+                                  <div className="text-sm whitespace-pre-wrap">{annotation}</div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                      {conversations.slice(0, selectedCount).filter(c => annotations[c.conversation_id]).length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground">
+                          Noch keine Annotierungen vorhanden
+                        </div>
+                      )}
+                    </div>
+                  </DialogContent>
+                </Dialog>
+                <Button onClick={exportAnnotations} variant="outline" size="default">
+                  Annotationen exportieren
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -257,7 +369,7 @@ export default function AnnotationsPage() {
                   <div className="flex items-center gap-3">
                     <Badge variant="outline" className="text-xs">#{idx + 1}</Badge>
                     <div>
-                      <div className="font-medium">M9 Konversation</div>
+                      <div className="font-medium">Repräsentative Konversation</div>
                       <div className="text-xs text-muted-foreground mt-1">ID: {conv.conversation_id}</div>
                     </div>
                   </div>
