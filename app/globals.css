@@ -28,3 +28,38 @@ body {
   background-color: var(--color-background);
   color: var(--color-foreground);
 }
+
+/* Markdown content styling */
+.prose p {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.prose ul,
+.prose ol {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-left: 1.5rem !important;
+}
+
+.prose li {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+.prose ul {
+  list-style-type: disc !important;
+}
+
+.prose ol {
+  list-style-type: decimal !important;
+}
+
+.prose strong {
+  font-weight: 600 !important;
+}
+
+.prose a {
+  color: hsl(221.2 83.2% 53.3%) !important;
+  text-decoration: underline !important;
+}

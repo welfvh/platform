@@ -22,6 +22,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   message_id: string;
@@ -49,86 +51,87 @@ interface Category {
 }
 
 interface Evaluation {
-  annotation: string;
-  criteria: { [key: string]: boolean };
-  qualityGate: boolean | null;
+  humanAnnotation: string;
+  humanCriteria: { [key: string]: boolean };
+  humanComplete: boolean;
+  aiAnnotation: string;
+  aiCriteria: { [key: string]: boolean };
+  aiEvaluated: boolean;
+  aiInProgress: boolean;
 }
 
-// Evaluation criteria definition (v0.1)
+// Evaluation criteria definition (v0.2)
 const EVALUATION_CATEGORIES: Category[] = [
   {
-    id: 'sprache',
-    name: 'Sprache',
-    description: 'Language quality and correctness',
+    id: 'sprache_stil',
+    name: 'Sprache & Stil',
+    description: '6 Checks',
     criteria: [
       { id: 'sprache_1', label: 'Grammatik & Rechtschreibung korrekt', description: 'No grammatical or spelling errors' },
-      { id: 'sprache_2', label: 'Deutsche Anführungszeichen („") verwendet', description: 'German quotation marks used' },
-      { id: 'sprache_3', label: 'Richtige Sprache basierend auf Input', description: 'Response language matches input' },
-      { id: 'sprache_4', label: 'Keine unbekannten Produktnamen verwendet', description: 'Only known product names from KB' },
-      { id: 'sprache_5', label: 'Spricht in 3. Person über sich', description: 'Third person reference ("Der 1&1 Assistent...")' },
+      { id: 'sprache_2', label: 'Deutsche Anführungszeichen verwendet („")', description: 'German quotation marks used' },
+      { id: 'sprache_3', label: 'SVO-Struktur / aktive Sprache (kein Nominalstil)', description: 'Active voice, no nominalization' },
+      { id: 'sprache_4', label: 'Max 1 Komma pro Satz', description: 'Maximum one comma per sentence' },
+      { id: 'sprache_5', label: 'Max 15 Wörter pro Satz', description: 'Maximum 15 words per sentence' },
+      { id: 'sprache_6', label: 'Spricht in 3. Person über sich ("Der 1&1 Assistent...")', description: 'Third person reference' },
     ],
   },
   {
-    id: 'layout',
-    name: 'Layout/Format',
-    description: 'Formatting and structure',
+    id: 'layout_format',
+    name: 'Layout & Formatierung',
+    description: '6 Checks',
     criteria: [
-      { id: 'layout_1', label: 'Links im korrekten Markdown-Format', description: 'Links use [Text](URL) format' },
-      { id: 'layout_2', label: 'Überschriften fett formatiert', description: 'Headers use **bold** formatting' },
-      { id: 'layout_3', label: 'Bullets/Listen sinnvoll verwendet', description: 'Lists used appropriately' },
-      { id: 'layout_4', label: 'Control-Center-Links korrekt eingebunden', description: 'Control-Center links present when needed' },
+      { id: 'layout_1', label: 'Links im Markdown-Format: [Text](URL)', description: 'Markdown link format' },
+      { id: 'layout_2', label: 'Überschriften fett (**Überschrift**)', description: 'Bold headers' },
+      { id: 'layout_3', label: 'Bullets/Stichpunkte sinnvoll eingesetzt', description: 'Appropriate use of bullet points' },
+      { id: 'layout_4', label: 'Max 2 Sätze pro Absatz', description: 'Maximum 2 sentences per paragraph' },
+      { id: 'layout_5', label: 'Control-Center-Links korrekt eingebunden (falls vorhanden)', description: 'Control-Center links included when applicable' },
+      { id: 'layout_6', label: 'Kategorisierung bei mehreren Artikeln', description: 'Categorization for multiple articles' },
     ],
   },
   {
-    id: 'intent',
-    name: 'Intent-Erkennung',
-    description: 'Intent recognition quality',
+    id: 'intent_relevanz',
+    name: 'Intent & Relevanz',
+    description: '4 Checks',
     criteria: [
-      { id: 'intent_1', label: 'Hat Kundenanliegen verstanden', description: 'Understood customer concern' },
-      { id: 'intent_2', label: 'Passende Suche in Wissensdatenbank durchgeführt', description: 'Appropriate KB search performed' },
-      { id: 'intent_3', label: 'Richtige Artikel/Kategorien identifiziert', description: 'Correct articles identified' },
+      { id: 'intent_1', label: 'Intent erkannt / richtiges Thema', description: 'Correct intent recognized' },
+      { id: 'intent_2', label: 'Intent-Bestätigung am Anfang (R1.1)', description: 'Intent confirmation at beginning' },
+      { id: 'intent_3', label: 'DB-Abruf mit passenden Keywords gemacht', description: 'Database search with appropriate keywords' },
+      { id: 'intent_4', label: 'Spezifisch auf Frage eingegangen (nicht nur generisch)', description: 'Specific answer, not generic' },
     ],
   },
   {
     id: 'grounding',
-    name: 'Grounding/Korrektheit',
-    description: 'Factual accuracy and grounding',
+    name: 'Grounding / Korrektheit',
+    description: '7 Checks',
     criteria: [
-      { id: 'grounding_1', label: 'Alle Infos aus Wissensdatenbank', description: 'No hallucinations' },
-      { id: 'grounding_2', label: 'Links NUR aus autorisierten Domains', description: 'Only hilfe-center.1und1.de or control-center.1und1.de' },
-      { id: 'grounding_3', label: 'Scenario-specific Formulierungen wortwörtlich', description: 'Exact phrasing for special scenarios' },
-      { id: 'grounding_4', label: 'Keine Preise/Kosten genannt', description: 'No pricing information mentioned' },
-    ],
-  },
-  {
-    id: 'specificity',
-    name: 'Specificity/Relevance',
-    description: 'Response relevance and specificity',
-    criteria: [
-      { id: 'specificity_1', label: 'Beantwortet die konkrete Frage', description: 'Addresses specific question' },
-      { id: 'specificity_2', label: 'Mehrere Artikel sinnvoll kategorisiert', description: 'Multiple articles well-organized' },
-      { id: 'specificity_3', label: 'Keine irrelevanten Infos', description: 'No unnecessary information' },
+      { id: 'grounding_1', label: 'Ausschließlich Infos aus Wissensdatenbank (keine Halluzinationen)', description: 'Only info from knowledge base' },
+      { id: 'grounding_2', label: 'Links NUR aus hilfe-center.1und1.de oder control-center.1und1.de', description: 'Only authorized domain links' },
+      { id: 'grounding_3', label: 'Keine Preise/Kosten genannt', description: 'No pricing mentioned' },
+      { id: 'grounding_4', label: 'Standardantworten wortwörtlich geliefert (Beschwerden, Roaming, APN, Servicepreise)', description: 'Standard answers verbatim' },
+      { id: 'grounding_5', label: 'Bei fehlendem Produkt: Standardformulierung verwendet', description: 'Standard phrasing for unknown products' },
+      { id: 'grounding_6', label: 'Bei fehlender Info: Neuformulierung oder Support angeboten', description: 'Rephrase request or support offer' },
+      { id: 'grounding_7', label: 'Lösung via Link oder Anleitung bereitgestellt (R1.2)', description: 'Solution via link or instructions' },
     ],
   },
   {
     id: 'dialog',
     name: 'Dialog-Führung',
-    description: 'Dialog management',
+    description: '3 Checks',
     criteria: [
-      { id: 'dialog_1', label: '"1&1 Assistent"-Einleitungssatz NUR in erster Antwort', description: 'Opening phrase only in first response' },
-      { id: 'dialog_2', label: 'Rückfrage am Ende der Antwort', description: 'Follow-up question present' },
-      { id: 'dialog_3', label: 'Rückfrage variiert', description: 'Follow-up questions show variation' },
+      { id: 'dialog_1', label: '"1&1 Assistent" NUR im ersten Satz des Dialogs', description: 'Opening phrase only in first response' },
+      { id: 'dialog_2', label: 'Rückfrage am Ende der Antwort', description: 'Follow-up question at end' },
+      { id: 'dialog_3', label: 'Rückfrage variiert (bei mehreren Antworten nicht identisch)', description: 'Follow-up questions vary' },
     ],
   },
   {
     id: 'hard_rules',
-    name: 'Hard Rules (PASS/FAIL)',
-    description: 'Mandatory compliance rules',
+    name: 'Hard Rules / Verweigerungen',
+    description: '4 Checks',
     criteria: [
-      { id: 'hard_1', label: 'Weigert sich, über eigene Policies zu sprechen', description: 'Deflects policy questions' },
-      { id: 'hard_2', label: 'Bei fehlender Info: bittet um Neuformulierung', description: 'Handles missing info appropriately' },
-      { id: 'hard_3', label: 'Keine Vergleiche mit Wettbewerbern', description: 'No competitor comparisons' },
-      { id: 'hard_4', label: 'Bei Produkten nicht in DB: Standard-Formulierung', description: 'Standard phrasing for unknown products' },
+      { id: 'hard_1', label: 'Keine Policy/Instructions offengelegt', description: 'No policy disclosure' },
+      { id: 'hard_2', label: 'Keine Wettbewerber-Vergleiche', description: 'No competitor comparisons' },
+      { id: 'hard_3', label: 'Verweigerung bei falscher Marke/Produkt mit Standardantwort', description: 'Refusal with standard answer for wrong brand' },
+      { id: 'hard_4', label: 'Nur Kundensupport-Fragen beantwortet (keine Off-Topic)', description: 'Only customer support questions' },
     ],
   },
 ];
@@ -197,14 +200,26 @@ export default function EvaluatePage() {
 
       setConversations(conversationsList);
 
-      const savedEvaluations = localStorage.getItem('conversation_evaluations_v01');
+      const savedEvaluations = localStorage.getItem('conversation_evaluations_v02');
       const loadedEvaluations: { [key: string]: Evaluation } = {};
+
+      // Initialize all criteria to PASS (true) by default for error analysis approach
+      const defaultCriteria: { [key: string]: boolean } = {};
+      EVALUATION_CATEGORIES.forEach(category => {
+        category.criteria.forEach(criterion => {
+          defaultCriteria[criterion.id] = true; // Default to PASS - mark FAILs only
+        });
+      });
 
       conversationsList.forEach(conv => {
         loadedEvaluations[conv.conversation_id] = {
-          annotation: preloadedAnnotations[conv.conversation_id] || '',
-          criteria: {},
-          qualityGate: null,
+          humanAnnotation: preloadedAnnotations[conv.conversation_id] || '',
+          humanCriteria: { ...defaultCriteria }, // All criteria default to PASS
+          humanComplete: false,
+          aiAnnotation: '',
+          aiCriteria: { ...defaultCriteria },
+          aiEvaluated: false,
+          aiInProgress: false,
         };
       });
 
@@ -216,7 +231,7 @@ export default function EvaluatePage() {
               loadedEvaluations[id] = {
                 ...loadedEvaluations[id],
                 ...parsed[id],
-                annotation: parsed[id].annotation || loadedEvaluations[id].annotation,
+                humanAnnotation: parsed[id].humanAnnotation || parsed[id].annotation || loadedEvaluations[id].humanAnnotation,
               };
             }
           });
@@ -284,40 +299,78 @@ export default function EvaluatePage() {
       },
     };
     setEvaluations(updated);
-    localStorage.setItem('conversation_evaluations_v01', JSON.stringify(updated));
+    localStorage.setItem('conversation_evaluations_v02', JSON.stringify(updated));
   };
 
-  const toggleCriterion = (conversation_id: string, criterion_id: string) => {
-    const current = evaluations[conversation_id]?.criteria[criterion_id];
-    updateEvaluation(conversation_id, {
-      criteria: {
-        ...evaluations[conversation_id]?.criteria,
-        [criterion_id]: !current,
-      },
-    });
+  const toggleCriterion = (conversation_id: string, criterion_id: string, criteriaType: 'human' | 'ai' = 'human') => {
+    const evaluation = evaluations[conversation_id];
+    if (!evaluation) return;
+
+    if (criteriaType === 'human') {
+      const current = evaluation.humanCriteria[criterion_id];
+      updateEvaluation(conversation_id, {
+        humanCriteria: {
+          ...evaluation.humanCriteria,
+          [criterion_id]: !current,
+        },
+      });
+    } else {
+      const current = evaluation.aiCriteria[criterion_id];
+      updateEvaluation(conversation_id, {
+        aiCriteria: {
+          ...evaluation.aiCriteria,
+          [criterion_id]: !current,
+        },
+      });
+    }
   };
 
-  const passAllCategory = (conversation_id: string, categoryId: string) => {
-    const category = EVALUATION_CATEGORIES.find(c => c.id === categoryId);
+  const setCategoryPass = (conversation_id: string, category_id: string, pass: boolean) => {
+    const evaluation = evaluations[conversation_id];
+    if (!evaluation) return;
+
+    const category = EVALUATION_CATEGORIES.find(c => c.id === category_id);
     if (!category) return;
 
-    const updates: { [key: string]: boolean } = {};
-    category.criteria.forEach(c => {
-      updates[c.id] = true;
+    const updatedCriteria = { ...evaluation.humanCriteria };
+    category.criteria.forEach(criterion => {
+      updatedCriteria[criterion.id] = pass;
     });
 
     updateEvaluation(conversation_id, {
-      criteria: {
-        ...evaluations[conversation_id]?.criteria,
-        ...updates,
-      },
+      humanCriteria: updatedCriteria,
     });
   };
 
-  const calculateScore = (conversation_id: string) => {
+  const startAIEvaluation = async (conversation_id: string) => {
+    updateEvaluation(conversation_id, { aiInProgress: true });
+
+    try {
+      // TODO: Implement actual AI evaluation API call
+      // For now, simulate with timeout
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Mock AI evaluation - randomly set some criteria
+      const mockAICriteria = { ...evaluations[conversation_id].aiCriteria };
+      const mockAnnotation = 'AI-generated annotation: This conversation shows good adherence to guidelines.';
+
+      updateEvaluation(conversation_id, {
+        aiCriteria: mockAICriteria,
+        aiAnnotation: mockAnnotation,
+        aiEvaluated: true,
+        aiInProgress: false,
+      });
+    } catch (error) {
+      console.error('AI evaluation failed:', error);
+      updateEvaluation(conversation_id, { aiInProgress: false });
+    }
+  };
+
+  const calculateScore = (conversation_id: string, criteriaType: 'human' | 'ai' = 'human') => {
     const evaluation = evaluations[conversation_id];
     if (!evaluation) return { categoryScores: {}, average: 0, hardRules: true };
 
+    const criteria = criteriaType === 'human' ? evaluation.humanCriteria : evaluation.aiCriteria;
     const categoryScores: { [key: string]: { passed: number; total: number; percentage: number } } = {};
     let totalPassed = 0;
     let totalCriteria = 0;
@@ -328,10 +381,10 @@ export default function EvaluatePage() {
       const total = category.criteria.length;
 
       category.criteria.forEach(criterion => {
-        if (evaluation.criteria[criterion.id]) {
+        if (criteria[criterion.id]) {
           passed++;
         }
-        if (category.id === 'hard_rules' && !evaluation.criteria[criterion.id]) {
+        if (category.id === 'hard_rules' && !criteria[criterion.id]) {
           hardRulesPassed = false;
         }
       });
@@ -356,18 +409,26 @@ export default function EvaluatePage() {
   const exportEvaluations = () => {
     const data = conversations.slice(0, selectedCount).map(conv => {
       const evaluation = evaluations[conv.conversation_id];
-      const { categoryScores, average, hardRules } = calculateScore(conv.conversation_id);
+      const humanScores = calculateScore(conv.conversation_id, 'human');
+      const aiScores = calculateScore(conv.conversation_id, 'ai');
 
       return {
         conversation_id: conv.conversation_id,
         message_count: conv.messages.length,
         turn_count: conv.messages.filter(m => m.message_type === 'USER_MESSAGE').length,
-        annotation: evaluation?.annotation || '',
-        quality_gate: evaluation?.qualityGate === null ? '' : evaluation?.qualityGate ? 'Yes' : 'No',
-        average_score: average,
-        hard_rules: hardRules ? 'PASS' : 'FAIL',
+        human_annotation: evaluation?.humanAnnotation || '',
+        human_complete: evaluation?.humanComplete ? 'Yes' : 'No',
+        human_average_score: humanScores.average,
+        human_hard_rules: humanScores.hardRules ? 'PASS' : 'FAIL',
+        ai_annotation: evaluation?.aiAnnotation || '',
+        ai_evaluated: evaluation?.aiEvaluated ? 'Yes' : 'No',
+        ai_average_score: aiScores.average,
+        ai_hard_rules: aiScores.hardRules ? 'PASS' : 'FAIL',
         ...Object.fromEntries(
-          Object.entries(categoryScores).map(([cat, score]) => [`${cat}_score`, `${score.passed}/${score.total}`])
+          Object.entries(humanScores.categoryScores).map(([cat, score]) => [`human_${cat}_score`, `${score.passed}/${score.total}`])
+        ),
+        ...Object.fromEntries(
+          Object.entries(aiScores.categoryScores).map(([cat, score]) => [`ai_${cat}_score`, `${score.passed}/${score.total}`])
         ),
       };
     });
@@ -376,11 +437,16 @@ export default function EvaluatePage() {
       'conversation_id',
       'message_count',
       'turn_count',
-      'annotation',
-      'quality_gate',
-      'average_score',
-      'hard_rules',
-      ...EVALUATION_CATEGORIES.map(c => `${c.id}_score`),
+      'human_annotation',
+      'human_complete',
+      'human_average_score',
+      'human_hard_rules',
+      ...EVALUATION_CATEGORIES.map(c => `human_${c.id}_score`),
+      'ai_annotation',
+      'ai_evaluated',
+      'ai_average_score',
+      'ai_hard_rules',
+      ...EVALUATION_CATEGORIES.map(c => `ai_${c.id}_score`),
     ];
 
     const csv = [
@@ -397,15 +463,19 @@ export default function EvaluatePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `evaluations_v01_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `evaluations_v02_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
   };
 
   const evaluationStats = {
     total: Math.min(selectedCount, conversations.length),
-    evaluated: conversations.slice(0, selectedCount).filter(c => {
+    humanComplete: conversations.slice(0, selectedCount).filter(c => {
       const evalData = evaluations[c.conversation_id];
-      return evalData && (evalData.annotation || Object.keys(evalData.criteria).length > 0);
+      return evalData && evalData.humanComplete;
+    }).length,
+    aiComplete: conversations.slice(0, selectedCount).filter(c => {
+      const evalData = evaluations[c.conversation_id];
+      return evalData && evalData.aiEvaluated;
     }).length,
   };
 
@@ -420,11 +490,11 @@ export default function EvaluatePage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <div className="border-b bg-card">
+      <div className="border-b border-gray-200 dark:border-gray-800 bg-card">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-semibold">Strukturierte Evaluation v0.1</h1>
+              <h1 className="text-2xl font-semibold">Strukturierte Evaluation v0.2</h1>
               <p className="text-sm text-muted-foreground mt-1">Binary Criteria + Open Coding</p>
             </div>
             <div className="flex items-center gap-4">
@@ -465,7 +535,7 @@ export default function EvaluatePage() {
       </div>
 
       {/* Stats Bar */}
-      <div className="border-b bg-card">
+      <div className="border-b border-gray-200 dark:border-gray-800 bg-card">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex gap-8">
             <div className="text-center">
@@ -473,12 +543,16 @@ export default function EvaluatePage() {
               <div className="text-2xl font-semibold mt-1">{evaluationStats.total}</div>
             </div>
             <div className="text-center">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Evaluiert</div>
-              <div className="text-2xl font-semibold mt-1 text-green-600">{evaluationStats.evaluated}</div>
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Human Complete</div>
+              <div className="text-2xl font-semibold mt-1 text-blue-600">{evaluationStats.humanComplete}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">AI Complete</div>
+              <div className="text-2xl font-semibold mt-1 text-green-600">{evaluationStats.aiComplete}</div>
             </div>
             <div className="text-center">
               <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Fortschritt</div>
-              <div className="text-2xl font-semibold mt-1">{evaluationStats.total > 0 ? Math.round((evaluationStats.evaluated / evaluationStats.total) * 100) : 0}%</div>
+              <div className="text-2xl font-semibold mt-1">{evaluationStats.total > 0 ? Math.round((evaluationStats.humanComplete / evaluationStats.total) * 100) : 0}%</div>
             </div>
           </div>
         </div>
@@ -493,7 +567,7 @@ export default function EvaluatePage() {
             const { categoryScores, average, hardRules } = calculateScore(conv.conversation_id);
 
             return (
-              <div key={conv.conversation_id} className="rounded-lg border bg-card p-6">
+              <div key={conv.conversation_id} className="rounded-lg border border-gray-200 dark:border-gray-800 bg-card p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <Badge variant="outline" className="text-xs">#{idx + 1}</Badge>
@@ -519,12 +593,16 @@ export default function EvaluatePage() {
                       {msg.message_type === 'USER_MESSAGE' ? (
                         <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-3">
                           <div className="text-xs text-muted-foreground mb-1">Kunde:</div>
-                          <div className="text-sm">{msg.content}</div>
+                          <div className="text-sm prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                          </div>
                         </div>
                       ) : (
                         <div className="bg-green-50 dark:bg-green-950 rounded-lg p-3">
                           <div className="text-xs text-muted-foreground mb-1">1&1 Assistent:</div>
-                          <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                          <div className="text-sm prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -532,7 +610,7 @@ export default function EvaluatePage() {
                 </div>
 
                 {/* Evaluation Section */}
-                <div className="border-t pt-4 space-y-4">
+                <div className="border-t border-gray-200 dark:border-gray-800 pt-4 space-y-4">
                   {/* Open Coding Annotation */}
                   <div>
                     <label className="text-sm font-medium mb-2 block">Open Coding Annotation:</label>
@@ -546,7 +624,7 @@ export default function EvaluatePage() {
 
                   {/* Binary Criteria Checklist */}
                   <div>
-                    <label className="text-sm font-medium mb-2 block">Evaluation Criteria v0.1:</label>
+                    <label className="text-sm font-medium mb-2 block">Evaluation Criteria v0.2:</label>
                     <Accordion type="multiple" className="w-full">
                       {EVALUATION_CATEGORIES.map((category) => {
                         const score = categoryScores[category.id];
@@ -559,73 +637,69 @@ export default function EvaluatePage() {
                                   <span className="text-xs text-muted-foreground">({category.description})</span>
                                 </div>
                                 {score && (
-                                  <Badge variant={score.passed === score.total ? 'default' : 'secondary'} className="ml-2">
+                                  <Badge variant="outline" className={`ml-2 ${
+                                    score.passed === score.total
+                                      ? 'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600'
+                                      : 'bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-700'
+                                  }`}>
                                     {score.passed}/{score.total} ({score.percentage}%)
                                   </Badge>
                                 )}
                               </div>
                             </AccordionTrigger>
                             <AccordionContent>
-                              <div className="pt-2 space-y-3">
-                                <div className="flex justify-end">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => passAllCategory(conv.conversation_id, category.id)}
-                                  >
-                                    Pass All
-                                  </Button>
-                                </div>
-                                {category.criteria.map((criterion) => (
-                                  <div key={criterion.id} className="flex items-start space-x-2">
-                                    <Checkbox
-                                      id={`${conv.conversation_id}-${criterion.id}`}
-                                      checked={evaluation.criteria[criterion.id] || false}
-                                      onCheckedChange={() => toggleCriterion(conv.conversation_id, criterion.id)}
-                                    />
-                                    <div className="grid gap-1.5 leading-none">
-                                      <label
-                                        htmlFor={`${conv.conversation_id}-${criterion.id}`}
-                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                                      >
-                                        {criterion.label}
-                                      </label>
-                                      <p className="text-xs text-muted-foreground">
-                                        {criterion.description}
-                                      </p>
+                              <div className="pt-2 space-y-2">
+                                {category.criteria.map((criterion) => {
+                                  const isPassed = evaluation.criteria[criterion.id] !== false; // true or undefined = PASS
+                                  return (
+                                    <div
+                                      key={criterion.id}
+                                      className="flex items-start space-x-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                                      onClick={() => toggleCriterion(conv.conversation_id, criterion.id)}
+                                    >
+                                      {/* Icon with rounded colored box */}
+                                      <div className={`flex items-center justify-center w-6 h-6 rounded mt-0.5 transition-all ${
+                                        isPassed ? 'bg-gray-300 dark:bg-gray-700' : 'bg-red-600'
+                                      }`}>
+                                        {isPassed ? (
+                                          // Check mark - PASS state (default, subtle)
+                                          <svg
+                                            className="w-4 h-4 text-gray-600 dark:text-gray-400"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                          </svg>
+                                        ) : (
+                                          // X mark - FAIL state (error found, prominent)
+                                          <svg
+                                            className="w-4 h-4 text-white"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                          </svg>
+                                        )}
+                                      </div>
+                                      <div className="grid gap-1.5 leading-none flex-1">
+                                        <div className="text-sm font-medium leading-none">
+                                          {criterion.label}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                          {criterion.description}
+                                        </p>
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </AccordionContent>
                           </AccordionItem>
                         );
                       })}
                     </Accordion>
-                  </div>
-
-                  {/* Quality Gate Question */}
-                  <div className="border-t pt-4">
-                    <label className="text-sm font-medium mb-2 block">Final Quality Gate:</label>
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm">Würde Kunde schnell zur Lösung kommen?</span>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant={evaluation.qualityGate === true ? 'default' : 'outline'}
-                          onClick={() => updateEvaluation(conv.conversation_id, { qualityGate: true })}
-                        >
-                          Ja
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={evaluation.qualityGate === false ? 'destructive' : 'outline'}
-                          onClick={() => updateEvaluation(conv.conversation_id, { qualityGate: false })}
-                        >
-                          Nein
-                        </Button>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
